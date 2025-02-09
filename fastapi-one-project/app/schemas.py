@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from datetime import datetime
 from typing import Optional
 
@@ -12,14 +12,13 @@ from typing import Optional
 #      UserCreate : UserBase   User : UserBase     
 class UserBase(BaseModel):
     username: str
-    email: str
+    email: EmailStr
 
 class UserCreate(UserBase):
     password: str
 
 class User(UserBase):
     id: int
-    created_at: datetime
     
     # allows the model to be initialized using objects 
     # (or ORM-like attributes) instead of just plain dictionaries.
@@ -59,17 +58,21 @@ class Post(PostBase):
     id: int
     timestamp: datetime
     owner_id: int
-
-class PostWithCounts(Post):
-    likes_count: int
-    retweets_count: int
     owner_username: str
-    
-class PostUpdate(BaseModel):
-    content: str
 
     class Config:
         from_attributes = True
+
+class PostWithCounts(Post):
+    likes_count: int = 0
+    retweets_count: int = 0
+    is_owner: bool = False
+
+    class Config:
+        from_attributes = True
+
+class PostUpdate(PostBase):
+    pass
 
 # LIKE SCHEMAS
 # Like is used to represent a like in the microblog.

@@ -45,9 +45,9 @@ class Post(Base):
     timestamp = Column(DateTime, default=datetime.now(timezone.utc))
     owner_id = Column(Integer, ForeignKey("users.id"))
 
-    owner = relationship("User", back_populates="posts") # Relationship to the User model
-    likes = relationship("Like", back_populates="post") # Relationship to the Like model
-    retweets = relationship("Retweet", back_populates="post") # Relationship to the Retweet model
+    owner = relationship("User", back_populates="posts")
+    likes = relationship("Like", back_populates="post", cascade="all, delete-orphan")
+    retweets = relationship("Retweet", back_populates="post", cascade="all, delete-orphan")
 
 class Like(Base):
     __tablename__ = "likes"

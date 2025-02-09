@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Annotated
 from datetime import timedelta, datetime, timezone
+from fastapi import status
 
 from .. import models, schemas, auth
 from ..database import get_db
@@ -49,8 +50,8 @@ def create_new_post(
     return db_post
 
 # Delete Existing Post Endpoint
-@router.delete("/{post_id}", status_code=204)
-def delete_existing_post(
+@router.delete("/{post_id}", response_model=dict)
+async def delete_existing_post(
     post_id: int,
     db: db_dependency,
     current_user: models.User = Depends(auth.get_current_user),
@@ -61,14 +62,34 @@ def delete_existing_post(
     Checks if the post exists in the database
     Checks if the post belongs to the current user
     Deletes the post from the database
-    Returns nothing
+    Returns a success message
     """
-    post = db.query(models.Post).filter(models.Post.id == post_id).first()
-    if post is None or post.owner_id != current_user.id:
-        raise_not_found_exception('Post not found')
-    db.delete(post)
-    db.commit()
-    return
+    try:
+        # Get the post
+        post = db.query(models.Post).filter(models.Post.id == post_id).first()
+        
+        # Check if post exists
+        if post is None:
+            raise_not_found_exception('Post not found')
+            
+        # Check if user owns the post
+        if post.owner_id != current_user.id:
+            raise_forbidden_exception('Not authorized to delete this post')
+        
+        # Delete the post
+        db.delete(post)
+        db.commit()
+        
+        return {"status": "success", "message": "Post deleted successfully"}
+        
+    except Exception as e:
+        db.rollback()
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 # Update Post Endpoint
 @router.put("/{post_id}", response_model=schemas.Post)
@@ -201,10 +222,13 @@ def unretweet_post(
 
 # Get Posts with Counts Endpoint
 @router.get("/with_counts/", response_model=List[schemas.PostWithCounts])
-def read_posts_with_counts(db: db_dependency):
+def read_posts_with_counts(
+    db: db_dependency,
+    current_user: models.User = Depends(auth.get_current_user)
+):
     """
     Get posts with counts
-    Takes the db dependen  
+    Takes the db dependency and current user
     Creates a subquery to count the number of likes for each post
     Creates a subquery to count the number of retweets for each post
     Fetches the posts along with their like/retweet counts and owner username
@@ -219,7 +243,6 @@ def read_posts_with_counts(db: db_dependency):
         .subquery()
     )
 
-    # Create a subquery to count retweets for each post
     retweets_subq = (
         db.query(
             models.Retweet.post_id,
@@ -229,33 +252,31 @@ def read_posts_with_counts(db: db_dependency):
         .subquery()
     )
 
-    # Fetch posts along with their like/retweet counts and owner username
     posts = (
         db.query(
-            models.Post,  # Select the post data
-            models.User.username.label('owner_username'),  # Include owner's username
-            func.coalesce(likes_subq.c.likes_count, 0).label('likes_count'),  # Join with likes count
-            func.coalesce(retweets_subq.c.retweets_count, 0).label('retweets_count')  # Join with retweets count
+            models.Post,
+            models.User.username.label('owner_username'),
+            func.coalesce(likes_subq.c.likes_count, 0).label('likes_count'),
+            func.coalesce(retweets_subq.c.retweets_count, 0).label('retweets_count')
         )
-        .join(models.User, models.Post.owner_id == models.User.id)  # Join Post with User table to get username
-        .outerjoin(likes_subq, models.Post.id == likes_subq.c.post_id)  # Join posts with likes count subquery
-        .outerjoin(retweets_subq, models.Post.id == retweets_subq.c.post_id)  # Join posts with retweets count subquery
-        .order_by(models.Post.timestamp.desc())  # Order by post creation timestamp
-        .all()  # Execute the query
+        .join(models.User, models.Post.owner_id == models.User.id)
+        .outerjoin(likes_subq, models.Post.id == likes_subq.c.post_id)
+        .outerjoin(retweets_subq, models.Post.id == retweets_subq.c.post_id)
+        .order_by(models.Post.timestamp.desc())
+        .all()
     )
 
-    # Construct the response with posts, counts, and owner username
     response_posts = []
     for post, owner_username, likes_count, retweets_count in posts:
-        # Append each post along with its counts and owner's username to the response list
         response_posts.append(schemas.PostWithCounts(
             id=post.id,
             content=post.content,
             timestamp=post.timestamp,
-            owner_id=post.owner_id,
-            owner_username=owner_username,  # Include owner's username in the response
+            owner_id=post.owner_id,  # Make sure owner_id is included
+            owner_username=owner_username,
             likes_count=likes_count,
-            retweets_count=retweets_count
+            retweets_count=retweets_count,
+            is_owner=post.owner_id == current_user.id  # Add is_owner flag
         ))
 
     return response_posts

@@ -19,6 +19,15 @@ router = APIRouter(
 # Dependency Injection for the database
 db_dependency = Annotated[Session, Depends(get_db)]
 
+# Get Current User Endpoint
+@router.get("/me", response_model=schemas.User)
+def get_current_user(current_user: models.User = Depends(auth.get_current_user)):
+    """
+    Get current user information
+    Uses the JWT token to identify and return the current user's information
+    """
+    return current_user
+
 # User Registration Endpoint
 @router.post("/", response_model=schemas.User)
 def create_user(user: schemas.UserCreate, db: db_dependency):
