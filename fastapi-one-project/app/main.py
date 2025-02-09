@@ -3,23 +3,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from app.database import Base
-from app.routes import users, posts, auth
 
-# Create database engine
-SQLALCHEMY_DATABASE_URL = "sqlite:///./app.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+from .core.config import get_settings
+from .core.database import Base, engine
+from .api.v1.api import api_router
+
+settings = get_settings()
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
 # Create FastAPI app
 app = FastAPI(
-    title="FastAPI Social Network",
+    title=settings.PROJECT_NAME,
     description="A social network API built with FastAPI",
-    version="1.0.0",
+    version=settings.VERSION,
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -27,7 +25,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,7 +42,5 @@ templates = Jinja2Templates(directory="app/templates")
 async def root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-# Include routers
-app.include_router(auth.router)
-app.include_router(users.router)
-app.include_router(posts.router)
+# Include API router
+app.include_router(api_router, prefix=settings.API_V1_STR)

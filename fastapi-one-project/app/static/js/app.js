@@ -54,13 +54,12 @@ async function login(username, password) {
         formData.append('username', username);
         formData.append('password', password);
 
-        const response = await fetch('/auth/token', {
+        const response = await fetch('/api/v1/auth/token', {
             method: 'POST',
             body: formData
         });
 
         const data = await response.json();
-
         if (!response.ok) {
             throw new Error(data.detail || 'Login failed');
         }
@@ -70,6 +69,11 @@ async function login(username, password) {
         await getCurrentUser();
         if (currentUser) {
             console.log('Login successful:', currentUser);
+            // Clear any previous error messages
+            const errorDiv = document.getElementById('login-error');
+            if (errorDiv) {
+                errorDiv.classList.add('hidden');
+            }
             updateUI();
         } else {
             throw new Error('Failed to get user information after login');
@@ -93,7 +97,7 @@ function showError(elementId, message) {
 
 async function register(username, email, password) {
     try {
-        const response = await fetch('/users/', {
+        const response = await fetch('/api/v1/auth/register', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -101,25 +105,30 @@ async function register(username, email, password) {
             body: JSON.stringify({ username, email, password })
         });
 
-        if (!response.ok) throw new Error('Registration failed');
-
         const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.detail || 'Registration failed');
+        }
+
+        console.log('Registration successful:', data);
         await login(username, password);
     } catch (error) {
-        alert('Registration failed: ' + error.message);
+        console.error('Registration error:', error);
+        showError('register-error', error.message);
     }
 }
 
 async function getCurrentUser() {
     try {
-        const response = await fetch('/users/me', {
+        const response = await fetch('/api/v1/auth/me', {
             headers: {
                 'Authorization': `Bearer ${token}`
             }
         });
 
         if (!response.ok) {
-            throw new Error('Failed to get user info');
+            const data = await response.json();
+            throw new Error(data.detail || 'Failed to get user info');
         }
 
         currentUser = await response.json();
@@ -134,7 +143,7 @@ async function getCurrentUser() {
 
 async function createPost(content) {
     try {
-        const response = await fetch('/posts/', {
+        const response = await fetch('/api/v1/posts/', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`,
@@ -143,17 +152,22 @@ async function createPost(content) {
             body: JSON.stringify({ content })
         });
 
-        if (!response.ok) throw new Error('Failed to create post');
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.detail || 'Failed to create post');
+        }
 
+        showMessage('success-message', 'Post created successfully');
         await loadPosts();
     } catch (error) {
-        alert('Failed to create post: ' + error.message);
+        console.error('Failed to create post:', error);
+        showMessage('error-message', error.message);
     }
 }
 
 async function loadPosts() {
     try {
-        const response = await fetch('/posts/with_counts/', {
+        const response = await fetch('/api/v1/posts/with_counts/', {
             headers: {
                 'Authorization': `Bearer ${token}`
             }
@@ -202,17 +216,16 @@ function displayPosts(posts) {
 
 async function deletePost(postId) {
     try {
-        // Show confirmation dialog
         if (!confirm('Are you sure you want to delete this post?')) {
             return;
         }
 
         const post = document.getElementById(`post-${postId}`);
         if (post) {
-            post.classList.add('loading'); // Add loading state
+            post.classList.add('loading');
         }
 
-        const response = await fetch(`/posts/${postId}`, {
+        const response = await fetch(`/api/v1/posts/${postId}`, {
             method: 'DELETE',
             headers: {
                 'Authorization': `Bearer ${token}`,
@@ -238,9 +251,8 @@ async function deletePost(postId) {
             throw new Error(data.detail || 'Failed to delete post');
         }
 
-        // Show success message
         showMessage('success-message', data.message || 'Post deleted successfully');
-        await loadPosts(); // Refresh the posts list
+        await loadPosts();
     } catch (error) {
         console.error('Delete error:', error);
         showMessage('error-message', error.message);
@@ -272,7 +284,7 @@ function showMessage(type, message) {
 
 async function toggleLike(postId) {
     try {
-        const response = await fetch(`/posts/${postId}/like`, {
+        const response = await fetch(`/api/v1/posts/${postId}/like`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`
@@ -289,7 +301,7 @@ async function toggleLike(postId) {
 
 async function toggleRetweet(postId) {
     try {
-        const response = await fetch(`/posts/${postId}/retweet`, {
+        const response = await fetch(`/api/v1/posts/${postId}/retweet`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`
@@ -333,15 +345,31 @@ loginForm.addEventListener('submit', async (e) => {
 
 registerForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const username = registerForm.username.value;
-    const email = registerForm.email.value;
-    const password = registerForm.password.value;
+    const username = document.getElementById('register-username').value;
+    const email = document.getElementById('register-email').value;
+    const password = document.getElementById('register-password').value;
+    
+    // Clear previous error
+    const errorDiv = document.getElementById('register-error');
+    if (errorDiv) {
+        errorDiv.classList.add('hidden');
+    }
+    
+    if (!username || !email || !password) {
+        showError('register-error', 'Please fill in all fields');
+        return;
+    }
+    
     await register(username, email, password);
 });
 
 createPostForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const content = createPostForm.content.value;
+    if (!content.trim()) {
+        alert('Please enter some content for your post');
+        return;
+    }
     await createPost(content);
     createPostForm.content.value = '';
 });
