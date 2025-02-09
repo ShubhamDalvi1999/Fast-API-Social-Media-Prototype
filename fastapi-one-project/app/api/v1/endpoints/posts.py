@@ -1,23 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Annotated
 from datetime import timedelta, datetime, timezone
-from fastapi import status
 
-from .. import models, schemas, auth
-from ..database import get_db
-from ..exceptions import raise_not_found_exception, raise_forbidden_exception
+from app.models import Post, User, Like, Retweet
+from app.schemas import Post as PostSchema, PostCreate, PostUpdate, PostWithCounts
+from app.core.auth import get_current_user
+from app.core.dependencies import get_db
+from app.core.exceptions import raise_not_found_exception, raise_forbidden_exception
 
 router = APIRouter(
-    prefix="/posts",
     tags=["Posts"]
 )
 
 db_dependency = Annotated[Session, Depends(get_db)]
 
 # Get Posts Endpoint
-@router.get("/", response_model=List[schemas.Post])
+@router.get("/", response_model=List[PostSchema])
 def read_posts(db: db_dependency, skip: int = 0, limit: int = 10):
     """
     Get posts
@@ -27,15 +27,15 @@ def read_posts(db: db_dependency, skip: int = 0, limit: int = 10):
     Orders the posts by timestamp in descending order
     Returns the posts
     """
-    posts = db.query(models.Post).order_by(models.Post.timestamp.desc()).offset(skip).limit(limit).all()
+    posts = db.query(Post).order_by(Post.timestamp.desc()).offset(skip).limit(limit).all()
     return posts
 
 # Create New Post Endpoint
-@router.post("/", response_model=schemas.Post)
+@router.post("/", response_model=PostSchema)
 def create_new_post(
-    post: schemas.PostCreate,
+    post: PostCreate,
     db: db_dependency,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Create a new post
@@ -43,18 +43,26 @@ def create_new_post(
     Creates a new post in the database
     Returns the new post
     """
-    db_post = models.Post(content=post.content, owner_id=current_user.id)
+    db_post = Post(content=post.content, owner_id=current_user.id)
     db.add(db_post)
     db.commit()
     db.refresh(db_post)
-    return db_post
+    
+    # Add owner_username to response
+    return {
+        "id": db_post.id,
+        "content": db_post.content,
+        "timestamp": db_post.timestamp,
+        "owner_id": db_post.owner_id,
+        "owner_username": current_user.username
+    }
 
 # Delete Existing Post Endpoint
 @router.delete("/{post_id}", response_model=dict)
 async def delete_existing_post(
     post_id: int,
     db: db_dependency,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Delete an existing post
@@ -66,7 +74,7 @@ async def delete_existing_post(
     """
     try:
         # Get the post
-        post = db.query(models.Post).filter(models.Post.id == post_id).first()
+        post = db.query(Post).filter(Post.id == post_id).first()
         
         # Check if post exists
         if post is None:
@@ -92,12 +100,12 @@ async def delete_existing_post(
         )
 
 # Update Post Endpoint
-@router.put("/{post_id}", response_model=schemas.Post)
+@router.put("/{post_id}", response_model=PostSchema)
 def update_post(
     post_id: int,
-    post_update: schemas.PostUpdate,
+    post_update: PostUpdate,
     db: db_dependency,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Update an existing post
@@ -108,7 +116,7 @@ def update_post(
     Updates the post in the database
     Returns the updated post
     """
-    post = db.query(models.Post).filter(models.Post.id == post_id).first()
+    post = db.query(Post).filter(Post.id == post_id).first()
     if not post:
         raise_not_found_exception('Post not found')
     if post.owner_id != current_user.id:
@@ -129,7 +137,7 @@ def update_post(
 def like_post(
     post_id: int,
     db: db_dependency,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Like a post
@@ -139,13 +147,13 @@ def like_post(
     Adds the post to the current user's liked posts
     Returns nothing
     """
-    post = db.query(models.Post).filter(models.Post.id == post_id).first()
+    post = db.query(Post).filter(Post.id == post_id).first()
     if post is None:
         raise_not_found_exception('Post not found')
-    like = db.query(models.Like).filter_by(user_id=current_user.id, post_id=post_id).first()
+    like = db.query(Like).filter_by(user_id=current_user.id, post_id=post_id).first()
     if like:
         raise_not_found_exception("Already liked")
-    new_like = models.Like(user_id=current_user.id, post_id=post_id)
+    new_like = Like(user_id=current_user.id, post_id=post_id)
     db.add(new_like)
     db.commit()
     return
@@ -155,7 +163,7 @@ def like_post(
 def unlike_post(
     post_id: int,
     db: db_dependency,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Unlike a post
@@ -165,7 +173,7 @@ def unlike_post(
     Removes the post from the current user's liked posts
     Returns nothing
     """
-    like = db.query(models.Like).filter_by(user_id=current_user.id, post_id=post_id).first()
+    like = db.query(Like).filter_by(user_id=current_user.id, post_id=post_id).first()
     if not like:
         raise_not_found_exception("Not liked yet")
     db.delete(like)
@@ -177,7 +185,7 @@ def unlike_post(
 def retweet_post(
     post_id: int,
     db: db_dependency,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Retweet a post
@@ -187,13 +195,13 @@ def retweet_post(
     Adds the post to the current user's retweeted posts
     Returns nothing
     """
-    post = db.query(models.Post).filter(models.Post.id == post_id).first()
+    post = db.query(Post).filter(Post.id == post_id).first()
     if post is None:
         raise_not_found_exception('Post not found')
-    retweet = db.query(models.Retweet).filter_by(user_id=current_user.id, post_id=post_id).first()
+    retweet = db.query(Retweet).filter_by(user_id=current_user.id, post_id=post_id).first()
     if retweet:
         raise_not_found_exception("Already retweeted")
-    new_retweet = models.Retweet(user_id=current_user.id, post_id=post_id)
+    new_retweet = Retweet(user_id=current_user.id, post_id=post_id)
     db.add(new_retweet)
     db.commit()
     return
@@ -203,7 +211,7 @@ def retweet_post(
 def unretweet_post(
     post_id: int,
     db: db_dependency,
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Unretweet a post
@@ -213,7 +221,7 @@ def unretweet_post(
     Removes the post from the current user's retweeted posts
     Returns nothing
     """
-    retweet = db.query(models.Retweet).filter_by(user_id=current_user.id, post_id=post_id).first()
+    retweet = db.query(Retweet).filter_by(user_id=current_user.id, post_id=post_id).first()
     if not retweet:
         raise_not_found_exception("Not retweeted yet")
     db.delete(retweet)
@@ -221,10 +229,10 @@ def unretweet_post(
     return
 
 # Get Posts with Counts Endpoint
-@router.get("/with_counts/", response_model=List[schemas.PostWithCounts])
+@router.get("/with_counts/", response_model=List[PostWithCounts])
 def read_posts_with_counts(
     db: db_dependency,
-    current_user: models.User = Depends(auth.get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get posts with counts
@@ -236,39 +244,39 @@ def read_posts_with_counts(
     """
     likes_subq = (
         db.query(
-            models.Like.post_id,
-            func.count(models.Like.user_id).label('likes_count')
+            Like.post_id,
+            func.count(Like.user_id).label('likes_count')
         )
-        .group_by(models.Like.post_id)
+        .group_by(Like.post_id)
         .subquery()
     )
 
     retweets_subq = (
         db.query(
-            models.Retweet.post_id,
-            func.count(models.Retweet.user_id).label('retweets_count')
+            Retweet.post_id,
+            func.count(Retweet.user_id).label('retweets_count')
         )
-        .group_by(models.Retweet.post_id)
+        .group_by(Retweet.post_id)
         .subquery()
     )
 
     posts = (
         db.query(
-            models.Post,
-            models.User.username.label('owner_username'),
+            Post,
+            User.username.label('owner_username'),
             func.coalesce(likes_subq.c.likes_count, 0).label('likes_count'),
             func.coalesce(retweets_subq.c.retweets_count, 0).label('retweets_count')
         )
-        .join(models.User, models.Post.owner_id == models.User.id)
-        .outerjoin(likes_subq, models.Post.id == likes_subq.c.post_id)
-        .outerjoin(retweets_subq, models.Post.id == retweets_subq.c.post_id)
-        .order_by(models.Post.timestamp.desc())
+        .join(User, Post.owner_id == User.id)
+        .outerjoin(likes_subq, Post.id == likes_subq.c.post_id)
+        .outerjoin(retweets_subq, Post.id == retweets_subq.c.post_id)
+        .order_by(Post.timestamp.desc())
         .all()
     )
 
     response_posts = []
     for post, owner_username, likes_count, retweets_count in posts:
-        response_posts.append(schemas.PostWithCounts(
+        response_posts.append(PostWithCounts(
             id=post.id,
             content=post.content,
             timestamp=post.timestamp,

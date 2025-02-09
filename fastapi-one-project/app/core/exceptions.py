@@ -17,4 +17,4 @@ def raise_unauthorized_exception(detail: str = "Incorrect username or password")
     )
 
 def raise_conflict_exception(detail: str = "Conflict occurred"):
-    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail) 
